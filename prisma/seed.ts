@@ -128,4 +128,170 @@ async function main() {
       name: 'Heard About Us',
       slug: 'referral_source',
       type: 'SELECT',
-      options: ['Google Search', 'Facebook', 'Recommendation', 'Local Ad']()
+      options: ['Google Search', 'Facebook', 'Recommendation', 'Local Ad', 'Previous Customer'],
+      isRequired: false,
+      order: 5
+    }
+  ]
+
+  for (const field of customFields) {
+    await prisma.customField.create({
+      data: {
+        ...field,
+        tenantId: demoTenant.id,
+        options: field.options ? JSON.stringify(field.options) : null
+      }
+    })
+  }
+
+  // Create message templates
+  const templates = [
+    {
+      name: 'Initial Contact SMS',
+      channel: 'SMS',
+      body:
+        "Hi {{lead.name}}, thanks for your interest in {{tenant.businessName}}. We'll be in touch within 24 hours to discuss your {{lead.productType}} requirements."
+    },
+    {
+      name: 'Quote Follow Up',
+      channel: 'EMAIL',
+      subject: 'Your Quote from {{tenant.businessName}}',
+      body:
+        "Dear {{lead.name}},\n\nThank you for choosing {{tenant.businessName}}. Please find attached your personalised quote.\n\nIf you have any questions, please don't hesitate to contact us.\n\nBest regards,\n{{user.name}}\n{{tenant.businessPhone}}"
+    },
+    {
+      name: 'Appointment Reminder',
+      channel: 'SMS',
+      body:
+        'Hi {{lead.name}}, this is a reminder of your appointment with {{tenant.businessName}} tomorrow at {{appointment.time}}. Please reply if you need to reschedule.'
+    },
+    {
+      name: 'Thank You Message',
+      channel: 'EMAIL',
+      subject: 'Thank you for choosing {{tenant.businessName}}',
+      body:
+        "Dear {{lead.name}},\n\nThank you for choosing {{tenant.businessName}} for your window treatments. We appreciate your business and hope you love your new {{lead.productType}}.\n\nPlease don't hesitate to contact us if you need anything else.\n\nBest regards,\nThe {{tenant.businessName}} Team"
+    }
+  ]
+
+  for (const template of templates) {
+    await prisma.template.create({
+      data: {
+        ...template,
+        tenantId: demoTenant.id,
+        channel: template.channel as any
+      }
+    })
+  }
+
+  // Create some demo leads
+  const newStatus = await prisma.leadStatus.findFirst({
+    where: { tenantId: demoTenant.id, slug: 'new' }
+  })
+
+  const contactedStatus = await prisma.leadStatus.findFirst({
+    where: { tenantId: demoTenant.id, slug: 'contacted' }
+  })
+
+  const venetianBlinds = await prisma.productType.findFirst({
+    where: { tenantId: demoTenant.id, slug: 'venetian-blinds' }
+  })
+
+  const shutters = await prisma.productType.findFirst({
+    where: { tenantId: demoTenant.id, slug: 'plantation-shutters' }
+  })
+
+  if (newStatus && contactedStatus && venetianBlinds && shutters) {
+    const demoLeads = [
+      {
+        name: 'John Smith',
+        email: 'john.smith@email.com',
+        phone: '+44 7123 456789',
+        address: '45 Oak Avenue, London',
+        postcode: 'SW12 8QR',
+        productTypeId: venetianBlinds.id,
+        estimatedValue: 850,
+        priority: 'HIGH',
+        source: 'website',
+        statusId: newStatus.id,
+        customFieldValues: {
+          property_type: 'House',
+          window_count: 6,
+          urgency: 'Within 2 weeks',
+          budget_range: '£500-£1000'
+        }
+      },
+      {
+        name: 'Emma Wilson',
+        email: 'emma.wilson@email.com',
+        phone: '+44 7987 654321',
+        address: '12 Pine Close, Brighton',
+        postcode: 'BN2 4RT',
+        productTypeId: shutters.id,
+        estimatedValue: 2200,
+        priority: 'MEDIUM',
+        source: 'referral',
+        statusId: contactedStatus.id,
+        customFieldValues: {
+          property_type: 'Flat',
+          window_count: 3,
+          urgency: 'Within a month',
+          budget_range: '£2000+'
+        }
+      },
+      {
+        name: 'Michael Brown',
+        email: 'mike.brown@email.com',
+        phone: '+44 7555 123456',
+        address: '78 Elm Street, Manchester',
+        postcode: 'M15 6PA',
+        productTypeId: venetianBlinds.id,
+        estimatedValue: 450,
+        priority: 'LOW',
+        source: 'google',
+        statusId: newStatus.id,
+        customFieldValues: {
+          property_type: 'Bungalow',
+          window_count: 4,
+          urgency: 'No rush',
+          budget_range: 'Under £500'
+        }
+      }
+    ]
+
+    for (const leadData of demoLeads) {
+      const lead = await prisma.lead.create({
+        data: {
+          ...leadData,
+          tenantId: demoTenant.id,
+          createdById: demoUser.id,
+          customFieldValues: JSON.stringify(leadData.customFieldValues)
+        }
+      })
+
+      // Create audit log for lead creation
+      await prisma.auditLog.create({
+        data: {
+          tenantId: demoTenant.id,
+          leadId: lead.id,
+          userId: demoUser.id,
+          action: 'LEAD_CREATED',
+          meta: JSON.stringify({ source: leadData.source })
+        }
+      })
+    }
+  }
+
+  console.log('Database seeded successfully!')
+  console.log(`Demo tenant: ${demoTenant.slug}`)
+  console.log(`Demo user: ${demoUser.email}`)
+}
+
+main()
+  .catch((e) => {
+    console.error(e)
+    process.exit(1)
+  })
+  .finally(async () => {
+    await prisma.$disconnect()
+  })
