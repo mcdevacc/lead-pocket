@@ -1,17 +1,110 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { createApiSupabase, requireTenantMembership, createAuditLog } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
-import { publicLeadSchema } from '@/lib/validations'
+import { createLeadSchema } from '@/lib/validations'
 import { z } from 'zod'
 
-// CORS headers for embed forms
-const corsHeaders = {
-  'Access-Control-Allow-Origin': process.env.ALLOWED_EMBED_ORIGINS || '*',
-  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-}
+const querySchema = z.object({
+  status: z.string().optional(),
+  productType: z.string().optional(),
+  priority: z.enum(['LOW', 'MEDIUM', 'HIGH', 'URGENT']).optional(),
+  search: z.string().optional(),
+  page: z.string().transform(val => parseInt(val) || 1).optional(),
+  limit: z.string().transform(val => Math.min(parseInt(val) || 20, 100)).optional()
+})
 
-export async function OPTIONS() {
-  return new Response(null, { status: 200, headers: corsHeaders })
+export async function GET(
+  request: NextRequest,
+  { params }: { params: { tenant: string } }
+) {
+  try {
+    const supabase = createApiSupabase()
+    const { data: { user } } = await supabase.auth.getUser()
+    
+    if (!user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
+
+    const membership = await requireTenantMembership(params.tenant, user.id)
+    const { searchParams } = new URL(request.url)
+    
+    const query = querySchema.parse({
+      status: searchParams.get('status'),
+      productType: searchParams.get('productType'),
+      priority: searchParams.get('priority'),
+      search: searchParams.get('search'),
+      page: searchParams.get('page'),
+      limit: searchParams.get('limit')
+    })
+
+    // Build where clause
+    const where: any = {
+      tenantId: membership.tenant.id
+    }
+
+    if (query.status) {
+      where.status = { slug: query.status }
+    }
+
+    if (query.productType) {
+      where.productType = { slug: query.productType }
+    }
+
+    if (query.priority) {
+      where.priority = query.priority
+    }
+
+    if (query.search) {
+      where.OR = [
+        { name: { contains: query.search, mode: 'insensitive' } },
+        { email: { contains: query.search, mode: 'insensitive' } },
+        { phone: { contains: query.search, mode: 'insensitive' } },
+        { postcode: { contains: query.search, mode: 'insensitive' } }
+      ]
+    }
+
+    const page = query.page || 1
+    const limit = query.limit || 20
+    const skip = (page - 1) * limit
+
+    const [leads, total] = await Promise.all([
+      prisma.lead.findMany({
+        where,
+        include: {
+          createdBy: { select: { name: true, email: true } },
+          assignedUser: { select: { name: true, email: true } },
+          productType: { select: { name: true, slug: true } },
+          status: { select: { name: true, slug: true, color: true } },
+          _count: { 
+            select: { 
+              appointments: true, 
+              messages: true 
+            } 
+          }
+        },
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take: limit
+      }),
+      prisma.lead.count({ where })
+    ])
+
+    return NextResponse.json({
+      leads,
+      pagination: {
+        page,
+        limit,
+        total,
+        pages: Math.ceil(total / limit)
+      }
+    })
+  } catch (error: any) {
+    console.error('GET /api/[tenant]/leads error:', error)
+    return NextResponse.json(
+      { error: error.message || 'Internal server error' },
+      { status: error.message?.includes('Forbidden') ? 403 : 500 }
+    )
+  }
 }
 
 export async function POST(
@@ -19,182 +112,95 @@ export async function POST(
   { params }: { params: { tenant: string } }
 ) {
   try {
-    // Check CORS origin
-    const origin = request.headers.get('origin')
-    const allowedOrigins = process.env.ALLOWED_EMBED_ORIGINS?.split(',') || []
+    const supabase = createApiSupabase()
+    const { data: { user } } = await supabase.auth.getUser()
     
-    if (origin && allowedOrigins.length > 0 && !allowedOrigins.includes(origin)) {
-      return NextResponse.json(
-        { error: 'Origin not allowed' },
-        { status: 403, headers: corsHeaders }
-      )
+    if (!user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    // Find tenant
-    const tenant = await prisma.tenant.findUnique({
-      where: { slug: params.tenant },
-      include: {
-        leadStatuses: {
-          where: { isDefault: true },
-          take: 1
-        }
-      }
-    })
-
-    if (!tenant) {
-      return NextResponse.json(
-        { error: 'Tenant not found' },
-        { status: 404, headers: corsHeaders }
-      )
-    }
-
-    const defaultStatus = tenant.leadStatuses[0]
-    if (!defaultStatus) {
-      return NextResponse.json(
-        { error: 'No default status configured for this tenant' },
-        { status: 500, headers: corsHeaders }
-      )
-    }
-
+    const membership = await requireTenantMembership(params.tenant, user.id)
     const body = await request.json()
-    const validatedData = publicLeadSchema.parse(body)
+    const validatedData = createLeadSchema.parse(body)
 
-    // Create system user for public leads if not exists
-    let systemUser = await prisma.user.findUnique({
-      where: { email: 'system@leadpocket.com' }
-    })
-
-    if (!systemUser) {
-      systemUser = await prisma.user.create({
-        data: {
-          email: 'system@leadpocket.com',
-          name: 'System',
-          emailVerified: new Date()
+    // Get default status if not provided
+    let statusId = body.statusId
+    if (!statusId) {
+      const defaultStatus = await prisma.leadStatus.findFirst({
+        where: { 
+          tenantId: membership.tenant.id,
+          isDefault: true 
         }
       })
+      statusId = defaultStatus?.id
     }
 
-    // Create the lead
+    if (!statusId) {
+      return NextResponse.json(
+        { error: 'No default status found. Please set up lead statuses first.' },
+        { status: 400 }
+      )
+    }
+
+    // Validate product type if provided
+    if (validatedData.productTypeId) {
+      const productType = await prisma.productType.findFirst({
+        where: {
+          id: validatedData.productTypeId,
+          tenantId: membership.tenant.id
+        }
+      })
+      
+      if (!productType) {
+        return NextResponse.json(
+          { error: 'Invalid product type' },
+          { status: 400 }
+        )
+      }
+    }
+
     const lead = await prisma.lead.create({
       data: {
-        name: validatedData.name,
-        email: validatedData.email || undefined,
-        phone: validatedData.phone,
-        address: validatedData.address,
-        postcode: validatedData.postcode,
-        notes: validatedData.message,
-        source: validatedData.source || 'website',
-        priority: 'MEDIUM',
-        tenantId: tenant.id,
-        createdById: systemUser.id,
-        statusId: defaultStatus.id,
-        customFieldValues: JSON.stringify({
-          ...validatedData.customFieldValues,
-          utm_source: validatedData.utmSource,
-          utm_medium: validatedData.utmMedium,
-          utm_campaign: validatedData.utmCampaign
-        })
+        ...validatedData,
+        tenantId: membership.tenant.id,
+        createdById: user.id,
+        statusId,
+        customFieldValues: JSON.stringify(validatedData.customFieldValues)
+      },
+      include: {
+        createdBy: { select: { name: true, email: true } },
+        assignedUser: { select: { name: true, email: true } },
+        productType: { select: { name: true, slug: true } },
+        status: { select: { name: true, slug: true, color: true } }
       }
     })
 
     // Create audit log
-    await prisma.auditLog.create({
-      data: {
-        tenantId: tenant.id,
-        leadId: lead.id,
-        action: 'LEAD_CREATED',
-        meta: JSON.stringify({
-          source: 'public_form',
-          origin: origin,
-          utm: {
-            source: validatedData.utmSource,
-            medium: validatedData.utmMedium,
-            campaign: validatedData.utmCampaign
-          }
-        })
+    await createAuditLog({
+      tenantId: membership.tenant.id,
+      leadId: lead.id,
+      userId: user.id,
+      action: 'LEAD_CREATED',
+      meta: {
+        source: validatedData.source,
+        productType: validatedData.productTypeId
       }
     })
 
-    return NextResponse.json(
-      { 
-        success: true, 
-        leadId: lead.id,
-        message: 'Thank you! We\'ll be in touch soon.' 
-      },
-      { status: 201, headers: corsHeaders }
-    )
+    return NextResponse.json(lead, { status: 201 })
   } catch (error: any) {
-    console.error('POST /api/public/[tenant]/leads error:', error)
+    console.error('POST /api/[tenant]/leads error:', error)
     
     if (error instanceof z.ZodError) {
       return NextResponse.json(
         { error: 'Validation error', details: error.errors },
-        { status: 400, headers: corsHeaders }
+        { status: 400 }
       )
     }
 
     return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500, headers: corsHeaders }
-    )
-  }
-}
-
-export async function GET(
-  request: NextRequest,
-  { params }: { params: { tenant: string } }
-) {
-  try {
-    // This endpoint returns form configuration for the embed
-    const tenant = await prisma.tenant.findUnique({
-      where: { slug: params.tenant },
-      include: {
-        settings: true,
-        productTypes: {
-          where: { isActive: true },
-          orderBy: { order: 'asc' }
-        },
-        customFields: {
-          where: { isActive: true },
-          orderBy: { order: 'asc' }
-        }
-      }
-    })
-
-    if (!tenant) {
-      return NextResponse.json(
-        { error: 'Tenant not found' },
-        { status: 404, headers: corsHeaders }
-      )
-    }
-
-    const formConfig = {
-      tenant: {
-        name: tenant.name,
-        businessName: tenant.settings?.businessName || tenant.name,
-        primaryColor: tenant.settings?.primaryColor || '#3b82f6'
-      },
-      productTypes: tenant.productTypes.map(pt => ({
-        id: pt.id,
-        name: pt.name,
-        slug: pt.slug
-      })),
-      customFields: tenant.customFields.map(cf => ({
-        id: cf.id,
-        name: cf.name,
-        slug: cf.slug,
-        type: cf.type,
-        options: cf.options ? JSON.parse(cf.options as string) : null,
-        isRequired: cf.isRequired
-      }))
-    }
-
-    return NextResponse.json(formConfig, { headers: corsHeaders })
-  } catch (error: any) {
-    console.error('GET /api/public/[tenant]/leads error:', error)
-    return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500, headers: corsHeaders }
+      { error: error.message || 'Internal server error' },
+      { status: error.message?.includes('Forbidden') ? 403 : 500 }
     )
   }
 }
