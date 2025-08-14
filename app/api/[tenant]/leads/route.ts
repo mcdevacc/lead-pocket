@@ -6,7 +6,7 @@ import { z } from 'zod';
 
 const prisma = new PrismaClient();
 
-// --- Validation schema (align with your UI payload) ---
+// --- Validation schema (aligns with your Lead fields) ---
 const LeadCreateSchema = z.object({
   name: z.string().min(1).optional(),
   email: z.string().email().optional(),
@@ -21,60 +21,58 @@ const LeadCreateSchema = z.object({
   source: z.string().optional(),
   notes: z.string().optional(),
 
-  // IDs coming from your UI / server context
   statusId: z.string(),
-
-  // JSON — allow any serialisable structure
   customFieldValues: z.any().optional(),
-
-  // Optional assignment
   assignedUserId: z.string().optional()
 });
 
-// Helper: coerce unknown -> Prisma.InputJsonValue
 const asJson = (v: unknown): Prisma.InputJsonValue => {
   if (v === undefined) return {};
-  // Trusting zod input; ensure serialisable
   return v as Prisma.InputJsonValue;
 };
 
-// If you already have your own auth/membership fetching, keep using it.
-// Stubs below to show shape — replace with your real logic.
-async function getCurrentUser(req: Request) {
-  // e.g., read session/cookies and fetch user
-  // must return { id: string }
-  throw new Error('Implement getCurrentUser()');
+// Helper: find creator user id from header or tenant admin (demo-friendly)
+async function resolveCreatorUserId(req: Request, tenantId: string): Promise<string | null> {
+  const headerUserId = req.headers.get('x-user-id');
+  if (headerUserId) return headerUserId;
+
+  // Fallback: use any ADMIN in this tenant (useful for initial/demo setups)
+  const admin = await prisma.membership.findFirst({
+    where: { tenantId, role: 'ADMIN' },
+    select: { userId: true }
+  });
+  return admin?.userId ?? null;
 }
 
-async function getMembershipForTenant(userId: string, tenantSlugOrId: string) {
-  // return membership with tenant id
-  // e.g., prisma.membership.findFirst({ where: { userId, tenant: { slug: tenantParam } }, include: { tenant: true } })
-  throw new Error('Implement getMembershipForTenant()');
-}
-
-// ---- CREATE LEAD (POST) ----
+// POST /api/[tenant]/leads  -> create a lead
 export async function POST(req: Request, { params }: { params: { tenant: string } }) {
   try {
-    const body = await req.json();
-    const parsed = LeadCreateSchema.parse(body);
+    const payload = await req.json();
+    const parsed = LeadCreateSchema.parse(payload);
 
-    // Load user + membership/tenant (replace with your existing logic)
-    const user = await getCurrentUser(req);
-    const membership = await getMembershipForTenant(user.id, params.tenant);
-    if (!membership?.tenant?.id) {
-      return NextResponse.json({ error: 'Tenant not found or access denied' }, { status: 403 });
+    // 1) Resolve tenant by slug param
+    const tenant = await prisma.tenant.findUnique({
+      where: { slug: params.tenant },
+      select: { id: true }
+    });
+    if (!tenant) {
+      return NextResponse.json({ error: 'Tenant not found' }, { status: 404 });
     }
 
-    // Build the unchecked data payload explicitly
+    // 2) Resolve creator user id (replace this with your real auth later)
+    const createdById = await resolveCreatorUserId(req, tenant.id);
+    if (!createdById) {
+      return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+    }
+
+    // 3) Build unchecked payload (raw FK ids)
     const data: Prisma.LeadUncheckedCreateInput = {
-      // FK ids (unchecked path)
-      tenantId: membership.tenant.id,
-      createdById: user.id,
+      tenantId: tenant.id,
+      createdById,
       statusId: parsed.statusId,
       productTypeId: parsed.productTypeId ?? null,
       assignedUserId: parsed.assignedUserId ?? null,
 
-      // Scalars
       name: parsed.name ?? '',
       email: parsed.email ?? null,
       phone: parsed.phone ?? null,
@@ -86,15 +84,13 @@ export async function POST(req: Request, { params }: { params: { tenant: string 
       source: parsed.source ?? null,
       notes: parsed.notes ?? null,
 
-      // JSON: pass actual object (NOT JSON.stringify)
       customFieldValues: asJson(parsed.customFieldValues ?? {})
     };
 
     const lead = await prisma.lead.create({ data });
-
     return NextResponse.json(lead, { status: 201 });
   } catch (err: any) {
-    if (err.name === 'ZodError') {
+    if (err?.name === 'ZodError') {
       return NextResponse.json({ error: 'Invalid payload', issues: err.issues }, { status: 400 });
     }
     console.error('Create lead error:', err);
@@ -102,22 +98,21 @@ export async function POST(req: Request, { params }: { params: { tenant: string 
   }
 }
 
-// ---- OPTIONAL: LIST LEADS (GET) ----
-// Keep this if your original file had it; otherwise remove.
-/*
+/* (Optional) GET list — keep only if you want it.
 export async function GET(_req: Request, { params }: { params: { tenant: string } }) {
   try {
-    const user = await getCurrentUser(_req);
-    const membership = await getMembershipForTenant(user.id, params.tenant);
-    if (!membership?.tenant?.id) {
-      return NextResponse.json({ error: 'Tenant not found or access denied' }, { status: 403 });
+    const tenant = await prisma.tenant.findUnique({
+      where: { slug: params.tenant },
+      select: { id: true }
+    });
+    if (!tenant) {
+      return NextResponse.json({ error: 'Tenant not found' }, { status: 404 });
     }
 
     const leads = await prisma.lead.findMany({
-      where: { tenantId: membership.tenant.id },
+      where: { tenantId: tenant.id },
       orderBy: { createdAt: 'desc' }
     });
-
     return NextResponse.json(leads);
   } catch (err) {
     console.error('List leads error:', err);
