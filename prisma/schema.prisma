@@ -3,84 +3,85 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
   directUrl = env("DIRECT_URL")
 }
 
 model Tenant {
-  id          String   @id @default(cuid())
-  name        String
-  slug        String   @unique
-  industry    String   // e.g., "home-improvement", "automotive", "real-estate"
-  timezone    String   @default("Europe/London")
-  
+  id            String        @id @default(cuid())
+  name          String
+  slug          String        @unique
+  industry      String        // e.g., "home-improvement", "automotive", "real-estate"
+  timezone      String        @default("Europe/London")
   // Configurable settings
-  settings    TenantSettings?
-  
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  settings      TenantSettings?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
 
-  memberships    Membership[]
-  leads          Lead[]
-  templates      Template[]
-  auditLogs      AuditLog[]
-  customFields   CustomField[]
-  leadStatuses   LeadStatus[]
-  productTypes   ProductType[]
+  memberships   Membership[]
+  leads         Lead[]
+  templates     Template[]
+  auditLogs     AuditLog[]
+  customFields  CustomField[]
+  leadStatuses  LeadStatus[]
+  productTypes  ProductType[]
 
   @@map("tenants")
 }
 
 model TenantSettings {
-  id                String  @id @default(cuid())
-  tenantId          String  @unique
-  
+  id                 String   @id @default(cuid())
+  tenantId           String   @unique
+
   // Business settings
-  businessName      String?
-  businessAddress   String?
-  businessPhone     String?
-  businessEmail     String?
-  website           String?
-  
+  businessName       String?
+  businessAddress    String?
+  businessPhone      String?
+  businessEmail      String?
+  website            String?
+
   // Working hours
-  workingHoursStart String  @default("09:00")
-  workingHoursEnd   String  @default("17:00")
-  workingDays       Json    @default("[1,2,3,4,5]") // Monday=1, Sunday=7
-  
+  workingHoursStart  String   @default("09:00")
+  workingHoursEnd    String   @default("17:00")
+  workingDays        Json     @default("[1,2,3,4,5]") // Monday=1, Sunday=7
+
   // Communication settings
   defaultEmailSender String?
   defaultSmsSender   String?
-  
+
   // Lead settings
-  autoAssignLeads    Boolean @default(false)
-  leadSlaHours       Int     @default(24)
-  
+  autoAssignLeads    Boolean  @default(false)
+  leadSlaHours       Int      @default(24)
+
   // Branding
-  primaryColor       String  @default("#3b82f6")
+  primaryColor       String   @default("#3b82f6")
   logo               String?
-  
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
-  
-  tenant            Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  tenant             Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   @@map("tenant_settings")
 }
 
 model User {
-  id            String   @id @default(cuid())
-  email         String   @unique
-  name          String?
-  emailVerified DateTime?
-  image         String?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  id             String     @id @default(cuid())
+  email          String     @unique
+  name           String?
+  emailVerified  DateTime?
+  image          String?
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
 
-  memberships  Membership[]
-  createdLeads Lead[]
-  messages     Message[]
-  auditLogs    AuditLog[]
+  memberships    Membership[]
+  // Back-relations for Lead.createdBy and Lead.assignedUser
+  createdLeads   Lead[]     @relation("LeadCreatedBy")
+  assignedLeads  Lead[]     @relation("LeadAssignedUser")
+
+  messages       Message[]
+  auditLogs      AuditLog[]
 
   @@map("users")
 }
@@ -90,7 +91,7 @@ model Membership {
   tenantId String
   userId   String
   role     Role   @default(AGENT)
-  
+
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -99,44 +100,45 @@ model Membership {
 }
 
 model Lead {
-  id                String    @id @default(cuid())
-  tenantId          String
-  createdById       String
-  
+  id               String    @id @default(cuid())
+  tenantId         String
+  createdById      String
+
   // Core lead fields
-  name              String
-  email             String?
-  phone             String?
-  address           String?
-  postcode          String?
-  
+  name             String
+  email            String?
+  phone            String?
+  address          String?
+  postcode         String?
+
   // Business specific fields
-  productTypeId     String?
-  jobValue          Float?
-  estimatedValue    Float?
-  priority          Priority  @default(MEDIUM)
-  source            String?   // "website", "referral", "advertising", etc.
-  
+  productTypeId    String?
+  jobValue         Float?
+  estimatedValue   Float?
+  priority         Priority  @default(MEDIUM)
+  source           String?   // "website", "referral", "advertising", etc.
+
   // Status and assignment
-  statusId          String
-  assignedUserId    String?
-  
+  statusId         String
+  assignedUserId   String?
+
   // Custom field values (JSON)
-  customFieldValues Json      @default("{}")
-  
+  customFieldValues Json     @default("{}")
+
   // Metadata
-  notes             String?
-  tags              Json      @default("[]")
-  
-  createdAt         DateTime  @default(now())
-  updatedAt         DateTime  @updatedAt
+  notes            String?
+  tags             Json      @default("[]")
+
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
 
   tenant           Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  createdBy        User          @relation(fields: [createdById], references: [id])
-  assignedUser     User?         @relation(fields: [assignedUserId], references: [id])
+  // Named relations to disambiguate the two User relations
+  createdBy        User          @relation("LeadCreatedBy", fields: [createdById], references: [id])
+  assignedUser     User?         @relation("LeadAssignedUser", fields: [assignedUserId], references: [id])
   productType      ProductType?  @relation(fields: [productTypeId], references: [id])
   status           LeadStatus    @relation(fields: [statusId], references: [id])
-  
+
   appointments     Appointment[]
   messages         Message[]
   auditLogs        AuditLog[]
@@ -148,21 +150,21 @@ model Lead {
 }
 
 model LeadStatus {
-  id          String  @id @default(cuid())
-  tenantId    String
-  name        String  // "New", "Contacted", "Qualified", "Proposal Sent", etc.
-  slug        String  // "new", "contacted", "qualified", "proposal_sent"
-  color       String  @default("#6b7280") // Hex color for UI
-  order       Int     // Display order
-  isDefault   Boolean @default(false)
-  isFinal     Boolean @default(false) // Won/Lost status
-  isActive    Boolean @default(true)
-  
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  
-  tenant      Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  leads       Lead[]
+  id         String   @id @default(cuid())
+  tenantId   String
+  name       String    // "New", "Contacted", "Qualified", "Proposal Sent", etc.
+  slug       String    // "new", "contacted", "qualified", "proposal_sent"
+  color      String    @default("#6b7280") // Hex color for UI
+  order      Int       // Display order
+  isDefault  Boolean   @default(false)
+  isFinal    Boolean   @default(false) // Won/Lost status
+  isActive   Boolean   @default(true)
+
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  tenant     Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  leads      Lead[]
 
   @@unique([tenantId, slug])
   @@index([tenantId, order])
@@ -170,18 +172,18 @@ model LeadStatus {
 }
 
 model ProductType {
-  id          String  @id @default(cuid())
+  id          String   @id @default(cuid())
   tenantId    String
-  name        String  // "Blinds", "Shutters", "Car Insurance", "Home Loan"
-  slug        String  // "blinds", "shutters", "car-insurance", "home-loan"
+  name        String   // "Blinds", "Shutters", "Car Insurance", "Home Loan"
+  slug        String   // "blinds", "shutters", "car-insurance", "home-loan"
   description String?
-  isActive    Boolean @default(true)
-  order       Int     @default(0)
-  
+  isActive    Boolean  @default(true)
+  order       Int      @default(0)
+
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
-  
-  tenant      Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   leads       Lead[]
 
   @@unique([tenantId, slug])
@@ -199,11 +201,11 @@ model CustomField {
   isRequired  Boolean          @default(false)
   isActive    Boolean          @default(true)
   order       Int              @default(0)
-  
+
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
-  
-  tenant      Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   @@unique([tenantId, slug])
   @@index([tenantId, order])
@@ -220,11 +222,11 @@ model Appointment {
   endsAt      DateTime?
   location    String?
   notes       String?
-  
+
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  lead Lead @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  lead        Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
 
   @@index([leadId])
   @@index([startsAt])
@@ -232,60 +234,60 @@ model Appointment {
 }
 
 model Message {
-  id        String           @id @default(cuid())
-  leadId    String
-  userId    String?
-  direction MessageDirection
-  channel   MessageChannel
-  subject   String?
-  body      String
-  from      String
-  to        String
-  
+  id             String           @id @default(cuid())
+  leadId         String
+  userId         String?
+  direction      MessageDirection
+  channel        MessageChannel
+  subject        String?
+  body           String
+  from           String
+  to             String
+
   // Provider metadata
   providerId     String? // External ID from Twilio/SendGrid
   providerStatus String? // delivered, failed, etc.
-  
-  createdAt DateTime @default(now())
 
-  lead Lead  @relation(fields: [leadId], references: [id], onDelete: Cascade)
-  user User? @relation(fields: [userId], references: [id])
+  createdAt      DateTime @default(now())
+
+  lead           Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  user           User?    @relation(fields: [userId], references: [id])
 
   @@index([leadId, createdAt])
   @@map("messages")
 }
 
 model Template {
-  id       String         @id @default(cuid())
-  tenantId String
-  name     String
-  channel  MessageChannel
-  subject  String?
-  body     String
-  isActive Boolean        @default(true)
-  
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id        String         @id @default(cuid())
+  tenantId  String
+  name      String
+  channel   MessageChannel
+  subject   String?
+  body      String
+  isActive  Boolean        @default(true)
 
-  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+
+  tenant    Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   @@index([tenantId, channel])
   @@map("templates")
 }
 
 model AuditLog {
-  id       String   @id @default(cuid())
-  tenantId String
-  leadId   String?
-  userId   String?
-  action   String   // "LEAD_CREATED", "STATUS_CHANGED", "MESSAGE_SENT", etc.
-  meta     Json?    // Additional context data
-  
+  id        String   @id @default(cuid())
+  tenantId  String
+  leadId    String?
+  userId    String?
+  action    String   // "LEAD_CREATED", "STATUS_CHANGED", "MESSAGE_SENT", etc.
+  meta      Json?    // Additional context data
+
   createdAt DateTime @default(now())
 
-  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  lead   Lead?  @relation(fields: [leadId], references: [id], onDelete: Cascade)
-  user   User?  @relation(fields: [userId], references: [id])
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  lead      Lead?    @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  user      User?    @relation(fields: [userId], references: [id])
 
   @@index([tenantId, createdAt])
   @@index([leadId])
