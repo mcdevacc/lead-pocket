@@ -135,14 +135,21 @@ async function main() {
   ]
 
   for (const field of customFields) {
-    await prisma.customField.create({
-      data: {
-        ...field,
-        tenantId: demoTenant.id,
-        options: field.options ? JSON.stringify(field.options) : null
-      }
-    })
-  }
+  const data: Prisma.CustomFieldUncheckedCreateInput = {
+    tenantId: demoTenant.id,
+    name: field.name,
+    slug: field.slug,
+    // cast string literal to Prisma enum
+    type: field.type as Prisma.$Enums.CustomFieldType,
+    isRequired: field.isRequired ?? false,
+    isActive: true,
+    order: field.order ?? 0,
+    // pass REAL JSON, not stringified JSON
+    options: (field.options as Prisma.InputJsonValue) ?? null,
+  };
+
+  await prisma.customField.create({ data });
+}
 
   // Create message templates
   const templates = [
