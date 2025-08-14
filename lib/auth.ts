@@ -2,7 +2,8 @@ import { createServerComponentClient } from '@supabase/auth-helpers-nextjs'
 import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs'
 import { cookies } from 'next/headers'
 import { prisma } from './prisma'
-import { Role } from '@prisma/client'
+
+type Role = 'ADMIN' | 'MANAGER' | 'AGENT'
 
 export function createServerSupabase() {
   return createServerComponentClient({ cookies })
@@ -68,8 +69,8 @@ export async function requireTenantMembership(
   }
 
   if (minRole) {
-    const roleHierarchy = { AGENT: 0, MANAGER: 1, ADMIN: 2 }
-    if (roleHierarchy[membership.role] < roleHierarchy[minRole]) {
+    const roleHierarchy: Record<Role, number> = { AGENT: 0, MANAGER: 1, ADMIN: 2 }
+    if (roleHierarchy[membership.role as Role] < roleHierarchy[minRole]) {
       throw new Error('Forbidden: Insufficient permissions')
     }
   }
