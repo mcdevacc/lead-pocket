@@ -1,3 +1,5 @@
+export const runtime = 'nodejs';
+
 import { NextRequest, NextResponse } from 'next/server'
 import { createApiSupabase, requireTenantMembership } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
