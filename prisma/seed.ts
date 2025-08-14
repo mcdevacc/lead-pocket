@@ -1,4 +1,4 @@
-import { Prisma, PrismaClient, CustomFieldType } from '@prisma/client'
+import { Prisma, PrismaClient, Priority } from '@prisma/client'
 
 const prisma = new PrismaClient()
 
@@ -266,28 +266,44 @@ async function main() {
       }
     ]
 
-    for (const leadData of demoLeads) {
-      const lead = await prisma.lead.create({
-        data: {
-          ...leadData,
-          tenantId: demoTenant.id,
-          createdById: demoUser.id,
-          customFieldValues: JSON.stringify(leadData.customFieldValues)
-        }
-      })
+for (const leadData of demoLeads) {
+  const data: Prisma.LeadUncheckedCreateInput = {
+    // FK ids (unchecked path)
+    tenantId: demoTenant.id,
+    createdById: demoUser.id,
+    statusId: leadData.statusId,
+    productTypeId: leadData.productTypeId ?? null,
+    assignedUserId: null,
 
-      // Create audit log for lead creation
-      await prisma.auditLog.create({
-        data: {
-          tenantId: demoTenant.id,
-          leadId: lead.id,
-          userId: demoUser.id,
-          action: 'LEAD_CREATED',
-          meta: JSON.stringify({ source: leadData.source })
-        }
-      })
+    // Scalars
+    name: leadData.name,
+    email: leadData.email ?? null,
+    phone: leadData.phone ?? null,
+    address: leadData.address ?? null,
+    postcode: leadData.postcode ?? null,
+    jobValue: leadData.jobValue ?? null,
+    estimatedValue: leadData.estimatedValue ?? null,
+    priority: (leadData.priority as Priority) ?? 'MEDIUM',
+    source: leadData.source ?? null,
+    notes: (leadData as any).notes ?? null,
+
+    // JSON — pass an object, NOT JSON.stringify(...)
+    customFieldValues: leadData.customFieldValues as Prisma.InputJsonValue,
+  };
+
+  const lead = await prisma.lead.create({ data });
+
+  await prisma.auditLog.create({
+    data: {
+      tenantId: demoTenant.id,
+      leadId: lead.id,
+      userId: demoUser.id,
+      action: 'LEAD_CREATED',
+      meta: JSON.stringify({ source: leadData.source })
     }
-  }
+  });
+}
+
 
   console.log('Database seeded successfully!')
   console.log(`Demo tenant: ${demoTenant.slug}`)
