@@ -5,7 +5,7 @@
   "description": "Multi-tenant CRM for lead management across industries",
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "prisma migrate deploy && next build",
     "start": "next start",
     "lint": "next lint",
     "db:generate": "prisma generate",
