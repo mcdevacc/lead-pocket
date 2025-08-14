@@ -170,8 +170,8 @@ export function downloadCSV(data: any[], filename: string): void {
   const headers = Object.keys(data[0])
   const csvContent = [
     headers.join(','),
-    ...data.map(row =>
-      headers.map(header => {
+    ...data.map((row: any) =>
+      headers.map((header: string) => {
         const cell = row[header]
         if (cell === null || cell === undefined) return ''
         if (typeof cell === 'string' && cell.includes(',')) {
