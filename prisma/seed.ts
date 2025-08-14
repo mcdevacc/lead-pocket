@@ -1,4 +1,4 @@
-import { Prisma, PrismaClient } from '@prisma/client'
+import { Prisma, PrismaClient, CustomFieldType } from '@prisma/client'
 
 const prisma = new PrismaClient()
 
@@ -140,7 +140,7 @@ async function main() {
     name: field.name,
     slug: field.slug,
     // cast string literal to Prisma enum
-    type: field.type as Prisma.$Enums.CustomFieldType,
+    type: field.type as CustomFieldType,
     isRequired: field.isRequired ?? false,
     isActive: true,
     order: field.order ?? 0,
