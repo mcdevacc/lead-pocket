@@ -224,4 +224,7 @@ body {
   background: transparent;
 }
 
-.custom-scrollbar
+.custom-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: hsl(var(--muted-foreground)) transparent;
+}
