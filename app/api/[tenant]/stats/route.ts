@@ -63,23 +63,23 @@ export async function GET(
 
     // Calculate pipeline value (exclude lost leads)
     const pipelineValue = allLeads
-      .filter(lead => !lead.status.isFinal || lead.status.slug === 'won')
-      .reduce((sum, lead) => sum + (lead.estimatedValue || lead.jobValue || 0), 0)
+      .filter((lead: any) => !lead.status.isFinal || lead.status.slug === 'won')
+      .reduce((sum: number, lead: any) => sum + (lead.estimatedValue || lead.jobValue || 0), 0)
 
     // Calculate won value
     const wonValue = allLeads
-      .filter(lead => lead.status.slug === 'won')
-      .reduce((sum, lead) => sum + (lead.estimatedValue || lead.jobValue || 0), 0)
+      .filter((lead: any) => lead.status.slug === 'won')
+      .reduce((sum: number, lead: any) => sum + (lead.estimatedValue || lead.jobValue || 0), 0)
 
     // Calculate conversion rate
     const totalLeads = allLeads.length
-    const wonLeads = allLeads.filter(lead => lead.status.slug === 'won').length
+    const wonLeads = allLeads.filter((lead: any) => lead.status.slug === 'won').length
     const conversionRate = totalLeads > 0 ? (wonLeads / totalLeads) * 100 : 0
 
     // Calculate average deal size
-    const leadsWithValue = allLeads.filter(lead => lead.estimatedValue || lead.jobValue)
+    const leadsWithValue = allLeads.filter((lead: any) => lead.estimatedValue || lead.jobValue)
     const averageDealSize = leadsWithValue.length > 0 
-      ? leadsWithValue.reduce((sum, lead) => sum + (lead.estimatedValue || lead.jobValue || 0), 0) / leadsWithValue.length
+      ? leadsWithValue.reduce((sum: number, lead: any) => sum + (lead.estimatedValue || lead.jobValue || 0), 0) / leadsWithValue.length
       : 0
 
     // Get upcoming appointments
@@ -156,7 +156,7 @@ export async function GET(
         conversionRate: Math.round(conversionRate * 100) / 100,
         averageDealSize: Math.round(averageDealSize * 100) / 100
       },
-      leadsByStatus: leadsByStatus.map(status => ({
+      leadsByStatus: leadsByStatus.map((status: any) => ({
         id: status.id,
         name: status.name,
         slug: status.slug,
@@ -164,18 +164,18 @@ export async function GET(
         count: status._count.leads,
         isFinal: status.isFinal
       })),
-      leadsBySource: leadsBySource.map(item => ({
+      leadsBySource: leadsBySource.map((item: any) => ({
         source: item.source || 'Unknown',
         count: item._count.id
       })),
-      upcomingAppointments: upcomingAppointments.map(appointment => ({
+      upcomingAppointments: upcomingAppointments.map((appointment: any) => ({
         id: appointment.id,
         type: appointment.type,
         title: appointment.title,
         startsAt: appointment.startsAt,
         lead: appointment.lead
       })),
-      recentActivity: recentActivity.map(log => ({
+      recentActivity: recentActivity.map((log: any) => ({
         id: log.id,
         action: log.action,
         createdAt: log.createdAt,
@@ -183,7 +183,7 @@ export async function GET(
         lead: log.lead?.name,
         meta: log.meta
       })),
-      dailyTrend: dailyLeads.map(item => ({
+      dailyTrend: dailyLeads.map((item: any) => ({
         date: item.date,
         count: Number(item.count)
       }))
