@@ -16,43 +16,7 @@ export async function GET(
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const membership = await requireTenantMembership(params.tenant, user.id, 'MANAGER')
-
-    const lead = await prisma.lead.findFirst({
-      where: {
-        id: params.id,
-        tenantId: membership.tenant.id
-      }
-    })
-
-    if (!lead) {
-      return NextResponse.json({ error: 'Lead not found' }, { status: 404 })
-    }
-
-    await prisma.lead.delete({
-      where: { id: params.id }
-    })
-
-    // Create audit log for lead deletion
-    await createAuditLog({
-      tenantId: membership.tenant.id,
-      leadId: lead.id,
-      userId: user.id,
-      action: 'LEAD_DELETED',
-      meta: {
-        leadName: lead.name
-      }
-    })
-
-    return NextResponse.json({ success: true })
-  } catch (error: any) {
-    console.error('DELETE /api/[tenant]/leads/[id] error:', error)
-    return NextResponse.json(
-      { error: error.message || 'Internal server error' },
-      { status: error.message?.includes('Forbidden') ? 403 : 500 }
-    )
-  }
-}enantMembership(params.tenant, user.id)
+    const membership = await requireTenantMembership(params.tenant, user.id)
 
     const lead = await prisma.lead.findFirst({
       where: {
@@ -267,4 +231,40 @@ export async function DELETE(
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const membership = await requireT
+    const membership = await requireTenantMembership(params.tenant, user.id, 'MANAGER')
+
+    const lead = await prisma.lead.findFirst({
+      where: {
+        id: params.id,
+        tenantId: membership.tenant.id
+      }
+    })
+
+    if (!lead) {
+      return NextResponse.json({ error: 'Lead not found' }, { status: 404 })
+    }
+
+    await prisma.lead.delete({
+      where: { id: params.id }
+    })
+
+    // Create audit log for lead deletion
+    await createAuditLog({
+      tenantId: membership.tenant.id,
+      leadId: lead.id,
+      userId: user.id,
+      action: 'LEAD_DELETED',
+      meta: {
+        leadName: lead.name
+      }
+    })
+
+    return NextResponse.json({ success: true })
+  } catch (error: any) {
+    console.error('DELETE /api/[tenant]/leads/[id] error:', error)
+    return NextResponse.json(
+      { error: error.message || 'Internal server error' },
+      { status: error.message?.includes('Forbidden') ? 403 : 500 }
+    )
+  }
+}
