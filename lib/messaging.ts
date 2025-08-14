@@ -68,26 +68,6 @@ export async function sendWhatsApp({ to, body, from }: SendMessageParams): Promi
       error: error.message
     }
   }
-}atsapp:${to}`
-    const whatsappFrom = from || process.env.TWILIO_WHATSAPP_NUMBER
-    
-    const message = await twilioClient.messages.create({
-      body,
-      from: whatsappFrom,
-      to: whatsappTo
-    })
-    
-    return {
-      success: true,
-      providerId: message.sid
-    }
-  } catch (error: any) {
-    console.error('WhatsApp send error:', error)
-    return {
-      success: false,
-      error: error.message
-    }
-  }
 }
 
 export async function sendEmail({ to, subject, body, from }: SendMessageParams): Promise<MessageResult> {
