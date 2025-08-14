@@ -1,17 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createApiSupabase, requireTenantMembership, createAuditLog } from '@/lib/auth'
+import { createApiSupabase, requireTenantMembership } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
-import { createLeadSchema } from '@/lib/validations'
-import { z } from 'zod'
-
-const querySchema = z.object({
-  status: z.string().optional(),
-  productType: z.string().optional(),
-  priority: z.enum(['LOW', 'MEDIUM', 'HIGH', 'URGENT']).optional(),
-  search: z.string().optional(),
-  page: z.string().transform(val => parseInt(val) || 1).optional(),
-  limit: z.string().transform(val => Math.min(parseInt(val) || 20, 100)).optional()
-})
+import { subDays, startOfDay, endOfDay } from 'date-fns'
 
 export async function GET(
   request: NextRequest,
@@ -28,176 +18,180 @@ export async function GET(
     const membership = await requireTenantMembership(params.tenant, user.id)
     const { searchParams } = new URL(request.url)
     
-    const query = querySchema.parse({
-      status: searchParams.get('status'),
-      productType: searchParams.get('productType'),
-      priority: searchParams.get('priority'),
-      search: searchParams.get('search'),
-      page: searchParams.get('page'),
-      limit: searchParams.get('limit')
-    })
+    // Get date range from query params (default to last 30 days)
+    const days = parseInt(searchParams.get('days') || '30')
+    const startDate = startOfDay(subDays(new Date(), days))
+    const endDate = endOfDay(new Date())
 
-    // Build where clause
-    const where: any = {
-      tenantId: membership.tenant.id
+    // Base where clause for all queries
+    const baseWhere = {
+      tenantId: membership.tenant.id,
+      createdAt: {
+        gte: startDate,
+        lte: endDate
+      }
     }
 
-    if (query.status) {
-      where.status = { slug: query.status }
-    }
-
-    if (query.productType) {
-      where.productType = { slug: query.productType }
-    }
-
-    if (query.priority) {
-      where.priority = query.priority
-    }
-
-    if (query.search) {
-      where.OR = [
-        { name: { contains: query.search, mode: 'insensitive' } },
-        { email: { contains: query.search, mode: 'insensitive' } },
-        { phone: { contains: query.search, mode: 'insensitive' } },
-        { postcode: { contains: query.search, mode: 'insensitive' } }
-      ]
-    }
-
-    const page = query.page || 1
-    const limit = query.limit || 20
-    const skip = (page - 1) * limit
-
-    const [leads, total] = await Promise.all([
-      prisma.lead.findMany({
-        where,
-        include: {
-          createdBy: { select: { name: true, email: true } },
-          assignedUser: { select: { name: true, email: true } },
-          productType: { select: { name: true, slug: true } },
-          status: { select: { name: true, slug: true, color: true } },
-          _count: { 
-            select: { 
-              appointments: true, 
-              messages: true 
-            } 
+    // Get lead counts by status
+    const leadsByStatus = await prisma.leadStatus.findMany({
+      where: { tenantId: membership.tenant.id },
+      include: {
+        _count: {
+          select: {
+            leads: {
+              where: baseWhere
+            }
           }
-        },
-        orderBy: { createdAt: 'desc' },
-        skip,
-        take: limit
-      }),
-      prisma.lead.count({ where })
-    ])
-
-    return NextResponse.json({
-      leads,
-      pagination: {
-        page,
-        limit,
-        total,
-        pages: Math.ceil(total / limit)
-      }
+        }
+      },
+      orderBy: { order: 'asc' }
     })
-  } catch (error: any) {
-    console.error('GET /api/[tenant]/leads error:', error)
-    return NextResponse.json(
-      { error: error.message || 'Internal server error' },
-      { status: error.message?.includes('Forbidden') ? 403 : 500 }
-    )
-  }
-}
 
-export async function POST(
-  request: NextRequest,
-  { params }: { params: { tenant: string } }
-) {
-  try {
-    const supabase = createApiSupabase()
-    const { data: { user } } = await supabase.auth.getUser()
-    
-    if (!user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
-
-    const membership = await requireTenantMembership(params.tenant, user.id)
-    const body = await request.json()
-    const validatedData = createLeadSchema.parse(body)
-
-    // Get default status if not provided
-    let statusId = body.statusId
-    if (!statusId) {
-      const defaultStatus = await prisma.leadStatus.findFirst({
-        where: { 
-          tenantId: membership.tenant.id,
-          isDefault: true 
-        }
-      })
-      statusId = defaultStatus?.id
-    }
-
-    if (!statusId) {
-      return NextResponse.json(
-        { error: 'No default status found. Please set up lead statuses first.' },
-        { status: 400 }
-      )
-    }
-
-    // Validate product type if provided
-    if (validatedData.productTypeId) {
-      const productType = await prisma.productType.findFirst({
-        where: {
-          id: validatedData.productTypeId,
-          tenantId: membership.tenant.id
-        }
-      })
-      
-      if (!productType) {
-        return NextResponse.json(
-          { error: 'Invalid product type' },
-          { status: 400 }
-        )
-      }
-    }
-
-    const lead = await prisma.lead.create({
-      data: {
-        ...validatedData,
+    // Get all leads for calculations
+    const allLeads = await prisma.lead.findMany({
+      where: {
         tenantId: membership.tenant.id,
-        createdById: user.id,
-        statusId,
-        customFieldValues: JSON.stringify(validatedData.customFieldValues)
+        createdAt: {
+          gte: startDate,
+          lte: endDate
+        }
       },
       include: {
-        createdBy: { select: { name: true, email: true } },
-        assignedUser: { select: { name: true, email: true } },
-        productType: { select: { name: true, slug: true } },
-        status: { select: { name: true, slug: true, color: true } }
+        status: true
       }
     })
 
-    // Create audit log
-    await createAuditLog({
-      tenantId: membership.tenant.id,
-      leadId: lead.id,
-      userId: user.id,
-      action: 'LEAD_CREATED',
-      meta: {
-        source: validatedData.source,
-        productType: validatedData.productTypeId
+    // Calculate pipeline value (exclude lost leads)
+    const pipelineValue = allLeads
+      .filter((lead: any) => !lead.status.isFinal || lead.status.slug === 'won')
+      .reduce((sum: number, lead: any) => sum + (lead.estimatedValue || lead.jobValue || 0), 0)
+
+    // Calculate won value
+    const wonValue = allLeads
+      .filter((lead: any) => lead.status.slug === 'won')
+      .reduce((sum: number, lead: any) => sum + (lead.estimatedValue || lead.jobValue || 0), 0)
+
+    // Calculate conversion rate
+    const totalLeads = allLeads.length
+    const wonLeads = allLeads.filter((lead: any) => lead.status.slug === 'won').length
+    const conversionRate = totalLeads > 0 ? (wonLeads / totalLeads) * 100 : 0
+
+    // Calculate average deal size
+    const leadsWithValue = allLeads.filter((lead: any) => lead.estimatedValue || lead.jobValue)
+    const averageDealSize = leadsWithValue.length > 0 
+      ? leadsWithValue.reduce((sum: number, lead: any) => sum + (lead.estimatedValue || lead.jobValue || 0), 0) / leadsWithValue.length
+      : 0
+
+    // Get upcoming appointments
+    const upcomingAppointments = await prisma.appointment.findMany({
+      where: {
+        lead: { tenantId: membership.tenant.id },
+        startsAt: {
+          gte: new Date(),
+          lte: endOfDay(subDays(new Date(), -7)) // Next 7 days
+        }
+      },
+      include: {
+        lead: {
+          select: {
+            id: true,
+            name: true,
+            phone: true,
+            email: true
+          }
+        }
+      },
+      orderBy: { startsAt: 'asc' },
+      take: 10
+    })
+
+    // Get recent activity
+    const recentActivity = await prisma.auditLog.findMany({
+      where: {
+        tenantId: membership.tenant.id,
+        createdAt: {
+          gte: subDays(new Date(), 7) // Last 7 days
+        }
+      },
+      include: {
+        user: { select: { name: true } },
+        lead: { select: { name: true } }
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 20
+    })
+
+    // Get leads by source
+    const leadsBySource = await prisma.lead.groupBy({
+      by: ['source'],
+      where: baseWhere,
+      _count: {
+        id: true
+      },
+      orderBy: {
+        _count: {
+          id: 'desc'
+        }
       }
     })
 
-    return NextResponse.json(lead, { status: 201 })
-  } catch (error: any) {
-    console.error('POST /api/[tenant]/leads error:', error)
-    
-    if (error instanceof z.ZodError) {
-      return NextResponse.json(
-        { error: 'Validation error', details: error.errors },
-        { status: 400 }
-      )
+    // Get daily lead creation trend
+    const dailyLeads = await prisma.$queryRaw`
+      SELECT 
+        DATE(created_at) as date,
+        COUNT(*) as count
+      FROM leads 
+      WHERE tenant_id = ${membership.tenant.id}
+        AND created_at >= ${startDate}
+        AND created_at <= ${endDate}
+      GROUP BY DATE(created_at)
+      ORDER BY date ASC
+    ` as Array<{ date: string; count: bigint }>
+
+    const stats = {
+      summary: {
+        totalLeads,
+        pipelineValue,
+        wonValue,
+        conversionRate: Math.round(conversionRate * 100) / 100,
+        averageDealSize: Math.round(averageDealSize * 100) / 100
+      },
+      leadsByStatus: leadsByStatus.map(status => ({
+        id: status.id,
+        name: status.name,
+        slug: status.slug,
+        color: status.color,
+        count: status._count.leads,
+        isFinal: status.isFinal
+      })),
+      leadsBySource: leadsBySource.map(item => ({
+        source: item.source || 'Unknown',
+        count: item._count.id
+      })),
+      upcomingAppointments: upcomingAppointments.map(appointment => ({
+        id: appointment.id,
+        type: appointment.type,
+        title: appointment.title,
+        startsAt: appointment.startsAt,
+        lead: appointment.lead
+      })),
+      recentActivity: recentActivity.map(log => ({
+        id: log.id,
+        action: log.action,
+        createdAt: log.createdAt,
+        user: log.user?.name || 'System',
+        lead: log.lead?.name,
+        meta: log.meta
+      })),
+      dailyTrend: dailyLeads.map(item => ({
+        date: item.date,
+        count: Number(item.count)
+      }))
     }
 
+    return NextResponse.json(stats)
+  } catch (error: any) {
+    console.error('GET /api/[tenant]/stats error:', error)
     return NextResponse.json(
       { error: error.message || 'Internal server error' },
       { status: error.message?.includes('Forbidden') ? 403 : 500 }
