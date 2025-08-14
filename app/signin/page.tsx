@@ -1,147 +1,233 @@
-'use client'
+'use client';
 
-import { createClientComponentClient } from '@supabase/auth-helpers-nextjs'
-import { useState, useEffect } from 'react'
-import { useRouter, useSearchParams } from 'next/navigation'
-import { Button } from '@/components/ui/button'
+import { useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
 
 export default function SignInPage() {
-  const [email, setEmail] = useState('')
-  const [loading, setLoading] = useState(false)
-  const [message, setMessage] = useState('')
-  const supabase = createClientComponentClient()
-  const router = useRouter()
-  const searchParams = useSearchParams()
-  const redirectTo = searchParams.get('redirect')
+  const [email, setEmail] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
 
-  useEffect(() => {
-    // Check if user is already signed in
-    const checkUser = async () => {
-      const { data: { user } } = await supabase.auth.getUser()
-      if (user && redirectTo) {
-        router.push(redirectTo)
-      } else if (user) {
-        // Redirect to a default tenant dashboard
-        router.push('/premier-blinds/dashboard')
-      }
+  const supabase = createClientComponentClient();
+  const router = useRouter();
+  const search = useSearchParams();
+  const redirectTo = search.get('redirect') || '/';
+
+  async function onSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setMsg(null);
+    setErr(null);
+
+    try {
+      const { error } = await supabase.auth.signInWithOtp({
+        email,
+        options: {
+          emailRedirectTo:
+            typeof window !== 'undefined'
+              ? `${window.location.origin}/auth/callback?redirect=${encodeURIComponent(redirectTo)}`
+              : undefined,
+        },
+      });
+      if (error) throw error;
+      setMsg('Magic link sent. Please check your email.');
+    } catch (e: any) {
+      setErr(e?.message || 'Something went wrong. Please try again.');
+    } finally {
+      setBusy(false);
     }
-    checkUser()
-  }, [supabase, router, redirectTo])
-
-  const handleSignIn = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setLoading(true)
-    setMessage('')
-
-    const redirectUrl = redirectTo 
-      ? `${window.location.origin}/auth/callback?redirect=${encodeURIComponent(redirectTo)}`
-      : `${window.location.origin}/auth/callback`
-
-    const { error } = await supabase.auth.signInWithOtp({
-      email,
-      options: {
-        emailRedirectTo: redirectUrl
-      }
-    })
-
-    if (error) {
-      setMessage(error.message)
-    } else {
-      setMessage('Check your email for the magic link!')
-    }
-    setLoading(false)
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
-      <div className="max-w-md w-full space-y-8">
-        <div>
-          <div className="mx-auto h-12 w-12 flex items-center justify-center rounded-xl bg-blue-600">
-            <svg className="h-8 w-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
-            </svg>
+    <>
+      <main className="wrap">
+        <section className="card">
+          <div className="brand">
+            <div className="logo">LP</div>
+            <h1>Sign in</h1>
+            <p className="muted">Access your Lead Pocket workspace</p>
           </div>
-          <h2 className="mt-6 text-center text-3xl font-extrabold text-gray-900">
-            Sign in to Lead Pocket
-          </h2>
-          <p className="mt-2 text-center text-sm text-gray-600">
-            Enter your email to receive a magic link
-          </p>
-        </div>
-        <form className="mt-8 space-y-6" onSubmit={handleSignIn}>
-          <div>
-            <label htmlFor="email" className="block text-sm font-medium text-gray-700">
-              Email address
+
+          <form onSubmit={onSubmit} className="form">
+            <label className="label" htmlFor="email">
+              Email
             </label>
             <input
               id="email"
-              name="email"
               type="email"
-              autoComplete="email"
-              required
-              className="mt-1 input"
-              placeholder="Enter your email address"
+              placeholder="you@example.com"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
+              required
+              className="input"
+              autoComplete="email"
             />
+
+            <button type="submit" className="button primary" disabled={busy}>
+              {busy ? 'Sending…' : 'Email me a magic link'}
+            </button>
+          </form>
+
+          <div className="divider">
+            <span>or</span>
           </div>
-          
-          <div>
-            <Button
-              type="submit"
-              disabled={loading}
-              className="w-full"
-            >
-              {loading ? (
-                <>
-                  <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                  </svg>
-                  Sending...
-                </>
-              ) : (
-                'Send Magic Link'
-              )}
-            </Button>
-          </div>
-          
-          {message && (
-            <div className={`rounded-md p-4 ${
-              message.includes('Check your email') 
-                ? 'bg-green-50 border border-green-200' 
-                : 'bg-red-50 border border-red-200'
-            }`}>
-              <div className="flex">
-                <div className="flex-shrink-0">
-                  {message.includes('Check your email') ? (
-                    <svg className="h-5 w-5 text-green-400" fill="currentColor" viewBox="0 0 20 20">
-                      <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-                    </svg>
-                  ) : (
-                    <svg className="h-5 w-5 text-red-400" fill="currentColor" viewBox="0 0 20 20">
-                      <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
-                    </svg>
-                  )}
-                </div>
-                <div className="ml-3">
-                  <p className={`text-sm font-medium ${
-                    message.includes('Check your email') ? 'text-green-800' : 'text-red-800'
-                  }`}>
-                    {message}
-                  </p>
-                </div>
-              </div>
-            </div>
-          )}
-        </form>
-        
-        <div className="text-center">
-          <p className="text-xs text-gray-500">
-            Demo login: admin@premierblinds.co.uk
+
+          <a href="/api/auth/signin" className="button ghost">
+            Continue with NextAuth
+          </a>
+
+          {msg && <p className="note success">{msg}</p>}
+          {err && <p className="note error">{err}</p>}
+
+          <p className="fineprint">
+            Trouble signing in? <a href="/">Go home</a>
           </p>
-        </div>
-      </div>
-    </div>
-  )
+        </section>
+      </main>
+
+      <style jsx>{`
+        :global(html, body) {
+          height: 100%;
+        }
+        .wrap {
+          min-height: 100vh;
+          display: grid;
+          place-items: center;
+          padding: 24px;
+          background: #0b1020; /* dark background */
+          color: #e5e7eb;
+        }
+        .card {
+          width: 100%;
+          max-width: 420px;
+          padding: 24px;
+          border-radius: 16px;
+          background: rgba(15, 23, 42, 0.85); /* slate-900-ish with blur look */
+          box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
+          border: 1px solid rgba(255, 255, 255, 0.07);
+        }
+        .brand {
+          text-align: center;
+          margin-bottom: 16px;
+        }
+        .logo {
+          width: 48px;
+          height: 48px;
+          margin: 0 auto 8px;
+          border-radius: 12px;
+          background: rgba(37, 99, 235, 0.15);
+          color: #60a5fa;
+          display: grid;
+          place-items: center;
+          font-weight: 700;
+          letter-spacing: 0.5px;
+        }
+        h1 {
+          margin: 0 0 4px;
+          font-size: 22px;
+          font-weight: 700;
+          line-height: 1.2;
+        }
+        .muted {
+          margin: 0;
+          font-size: 13px;
+          color: #94a3b8;
+        }
+        .form {
+          display: grid;
+          gap: 8px;
+          margin-top: 16px;
+        }
+        .label {
+          font-size: 13px;
+          color: #cbd5e1;
+        }
+        .input {
+          padding: 10px 12px;
+          border-radius: 10px;
+          border: 1px solid #334155;
+          background: #0f172a;
+          color: #e5e7eb;
+          outline: none;
+          transition: box-shadow 0.15s ease, border-color 0.15s ease;
+        }
+        .input:focus {
+          border-color: #3b82f6;
+          box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.25);
+        }
+        .button {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          gap: 8px;
+          height: 40px;
+          padding: 0 14px;
+          border-radius: 10px;
+          font-weight: 600;
+          font-size: 14px;
+          border: 1px solid transparent;
+          cursor: pointer;
+          transition: background 0.15s ease, border-color 0.15s ease, opacity 0.15s ease;
+        }
+        .button[disabled] {
+          opacity: 0.6;
+          cursor: not-allowed;
+        }
+        .primary {
+          background: #2563eb;
+          color: white;
+        }
+        .primary:hover {
+          background: #1d4ed8;
+        }
+        .ghost {
+          background: transparent;
+          color: #e5e7eb;
+          border-color: #334155;
+          width: 100%;
+        }
+        .ghost:hover {
+          background: #111827;
+        }
+        .divider {
+          display: grid;
+          grid-template-columns: 1fr auto 1fr;
+          align-items: center;
+          gap: 10px;
+          margin: 14px 0;
+          color: #94a3b8;
+          font-size: 12px;
+        }
+        .divider::before,
+        .divider::after {
+          content: '';
+          height: 1px;
+          background: #334155;
+          display: block;
+        }
+        .note {
+          margin-top: 10px;
+          font-size: 13px;
+          line-height: 1.3;
+        }
+        .success {
+          color: #86efac;
+        }
+        .error {
+          color: #fca5a5;
+        }
+        .fineprint {
+          margin: 16px 0 0;
+          text-align: center;
+          font-size: 12px;
+          color: #94a3b8;
+        }
+        .fineprint a {
+          color: #93c5fd;
+        }
+      `}</style>
+    </>
+  );
 }
