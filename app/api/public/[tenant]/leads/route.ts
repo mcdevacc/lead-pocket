@@ -174,12 +174,12 @@ export async function GET(
         businessName: tenant.settings?.businessName || tenant.name,
         primaryColor: tenant.settings?.primaryColor || '#3b82f6'
       },
-      productTypes: tenant.productTypes.map(pt => ({
+      productTypes: tenant.productTypes.map((pt: any) => ({
         id: pt.id,
         name: pt.name,
         slug: pt.slug
       })),
-      customFields: tenant.customFields.map(cf => ({
+      customFields: tenant.customFields.map((cf: any) => ({
         id: cf.id,
         name: cf.name,
         slug: cf.slug,
